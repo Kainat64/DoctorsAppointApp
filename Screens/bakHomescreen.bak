@@ -1,0 +1,1532 @@
+import {ScrollView,StyleSheet,Text,TextInput,TextComponent,Button,View,TouchableOpacity,Pressable,Image,PermissionsAndroid,Platform,StatusBar,Dimensions,Alert,Modal
+} from 'react-native';
+import React, {useState, useEffect} from 'react';
+import {NavigationContainer, useNavigation} from '@react-navigation/native';
+import {Padding, Color, FontSize, FontFamily, Border} from '../GlobalStyles';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {getUserDetails} from './Login&Register/authService';
+import FontAwesome from 'react-native-vector-icons/FontAwesome';
+import {SafeAreaView} from 'react-native-safe-area-context';
+import Geolocation from 'react-native-geolocation-service';
+import {check, request, PERMISSIONS, RESULTS} from 'react-native-permissions';
+import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import MyAppointment from './Appointments/MyAppointment';
+import ProfileScreen from './Profile/ProfileScreen';
+import MedicalRecordScreen from './Prescriptions/MedicalRecordScreen';
+import MyDoctorsScreen from './Doctors/MyDoctorsScreen';
+import DocumentsListScreen from './Prescriptions/DocumentsListScreen';
+import ReviewScreen from './Doctors/ReviewsScreen';
+import ZoomMeetScreen from './VoiceConsultation/ZoomMeetScreen';
+import JoinMeetingScreen from './VoiceConsultation/JoinMeetScreen';
+import {BaseUrl} from '../utils/BaseApi';
+import axios from 'axios';
+const Tab = createBottomTabNavigator();
+import GetLocation from 'react-native-get-location';
+import FontAwesomeIcon from 'react-native-vector-icons/FontAwesome';
+import {getDoctors} from '../utils/Api';
+import {getAllBlogPosts} from '../utils/Api';
+import {getHospitalList} from '../utils/Api';
+import {useAuth} from '../AuthContext';
+const {width} = Dimensions.get('window');
+import {Card} from 'react-native-gradient-card-view';
+import Icon from 'react-native-vector-icons/FontAwesome';
+import io from 'socket.io-client';
+const socket = io('http://localhost:3000/');
+export default function HomeScreen({props}) {
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  const navigation = useNavigation();
+  const {user, logout} = useAuth();
+  const [search, setSearch] = useState('');
+  const [users, setUsers] = useState(null);
+  const [location, setLocation] = useState(null);
+  const {width} = Dimensions.get('window');
+  const [blogs, setBlogs] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [hospitals, setHospitals] = useState([]);
+  const [cityName, setCityName] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const handleFocus = () => {
+    navigation.navigate('Search Doctors'); // Replace 'SearchScreen' with your actual screen name
+  };
+  useEffect(() => {
+    checkProfile();
+    fetchUser();
+    fetchNotifications();
+    setupSocket();
+    return () => socket.disconnect();
+  }, []);
+  const setupSocket = async () => {
+    try {
+      const userToken = await AsyncStorage.getItem('userToken');
+      console.log('Stored userToken:', userToken); // Log the value to check
+
+      if (userToken) {
+        // If the stored value is a token string, use it directly without parsing
+        console.log('Using token:', userToken);
+
+        // Join the user's room using the token as the user ID
+        socket.emit('join', userToken); // If userToken is just a string (like a token)
+
+        // Listen for notifications
+        socket.on(
+          'appointments-channel:App\\Events\\AppointmentConfirmed',
+          data => {
+            Alert.alert('Notification', data.message);
+            console.log('Notification received:', data.message); // Show notification
+          },
+        );
+      } else {
+        console.warn('User is not logged in.');
+      }
+    } catch (error) {
+      console.error('Failed to set up socket:', error);
+    }
+  };
+  const fetchNotifications = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken'); // Replace with user's auth token
+      const response = await axios.get(`${BaseUrl}/get-user-notifications`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      setNotifications(response.data.notifications);
+      setUnreadCount(response.data.unread_count);
+      console.log('Notifications fetched:', response.data);
+      console.log('Unread count:', response.data.unread_count);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
+  // Function to mark all notifications as read
+  const MarkAllReadNotification = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await axios.post(`${BaseUrl}/mark-read-user-notifications`, {}, {
+        headers: {
+          Authorization: `Bearer ${token}`, // Replace with your auth token logic if needed
+        },
+      });
+
+      if (response.data.success) {
+        // Update the local notifications state to mark them as read
+        setNotifications((prevNotifications) => 
+          prevNotifications.map((notification) => ({
+            ...notification,
+            status: 'read',
+          }))
+        );
+        //setShowNotifications(true);
+      } else {
+        console.error('Failed to mark notifications as read');
+      }
+    } catch (error) {
+      console.error('Error marking notifications as read:', error);
+    }
+  };
+  const handleBellClick = () => {
+    setShowNotifications(!showNotifications);
+  };
+  const handleCloseModal = () => {
+    setShowNotifications(false);
+    MarkAllReadNotification();
+  };
+  const fetchUser = async () => {
+    try {
+      // Retrieve the token from AsyncStorage
+      const token = await AsyncStorage.getItem('userToken');
+
+      if (token) {
+        // Set the token in the Axios header
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        // Make a request to your Laravel API to get the current user
+        const response = await axios.get(`${BaseUrl}/user`);
+        setUsers(response.data);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+  const checkProfile = async () => {
+    try {
+      // Get the stored user token (assuming it is stored after login)
+      const token = await AsyncStorage.getItem('userToken');
+
+      if (!token) {
+        Alert.alert('Error', 'User token not found. Please log in again.');
+        return;
+      }
+
+      // Make an API request to check profile completeness
+      const response = await axios.get(`${BaseUrl}/check-profile-complete`, {
+        headers: {
+          Authorization: `Bearer ${token}`, // Pass the token for authentication
+        },
+      });
+
+      // Ensure that `response` contains the expected data
+      if (response.data && response.data.profile_complete !== undefined) {
+        if (response.data.profile_complete) {
+          // navigation.navigate('Home');
+        } else {
+          navigation.navigate('My Profile');
+        }
+      } else {
+        throw new Error('Unexpected response format');
+      }
+    } catch (error) {
+      console.error('Error checking profile status:', error.message);
+      Alert.alert(
+        'Error',
+        'Failed to check profile completeness. Please try again later.',
+      );
+    }
+  };
+  // Fetch nearby doctors
+  const fetchNearbyDoctors = async () => {
+    try {
+      // Replace with your Laravel API endpoint for nearby doctors
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await axios.get(`${BaseUrl}/nearby-doctors`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      setDoctors(response.data);
+      console.log(response.data);
+    } catch (error) {
+      console.error('Error fetching nearby doctors', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    fetchNearbyDoctors();
+  }, []);
+  useEffect(() => {
+    const getBlogs = async () => {
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        const response = await axios.get(`${BaseUrl}/blog-posts`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        //console.log('fetching...');
+        setBlogs(response.data);
+        //console.log(response.data);
+        setLoading(false);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to fetch Blog Detail');
+        setLoading(false);
+      }
+    };
+    getBlogs();
+    // getNearbyDoctors();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' || Platform.OS === 'ios') {
+      getCurrentLocation();
+    }
+  }, []);
+
+  const getCurrentLocation = () => {
+    GetLocation.getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 60000,
+    })
+      .then(location => {
+        const {latitude, longitude} = location;
+        console.log('Latitude: ', latitude, 'Longitude: ', longitude);
+        getCityNameFromCoords(latitude, longitude);
+      })
+      .catch(error => {
+        const {code, message} = error;
+        console.warn(code, message);
+      });
+
+    const getCityNameFromCoords = async (latitude, longitude) => {
+      const API_KEY = 'AIzaSyBhVTUgGfUX_wRVPYAJVItDqxbhZgMDHok';
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${API_KEY}`;
+
+      try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.results.length > 0) {
+          const cityName = data.results[0].address_components.find(component =>
+            component.types.includes('locality'),
+          ).long_name;
+          setCityName(cityName); // Update the state with the city name
+          console.log(cityName);
+        } else {
+          setCityName('City not found');
+        }
+      } catch (error) {
+        console.error('Error in reverse geocoding: ', error);
+      }
+    };
+
+    return null;
+  };
+  const ShowDoctorsProfile = (doctorId) => {
+    navigation.navigate('DoctorProfile', { doctorId });
+  }
+  const HomePage = () => {
+    return (
+      <SafeAreaView style={{flex: 1}} nestedScrollEnabled={true}>
+        <ScrollView vectorContainer>
+          <StatusBar backgroundColor="#274A8A" />
+          <View style={styles.container}>
+            {/* Top Bar */}
+            <View style={styles.topBar}>
+              <TouchableOpacity onPress={() => navigation.openDrawer()}>
+                <Text style={{fontSize: 18}}>
+                  <FontAwesome
+                    name="bars"
+                    color="#420475"
+                    style={{marginLeft: 10, fontSize: 24}}
+                  />
+                </Text>
+              </TouchableOpacity>
+              <Text style={styles.logoText}>
+                <Image
+                  source={require('../assets/doc365-logo.png')} // Add the path to your logo image
+                  style={{
+                    width: 160,
+                    height: 40,
+                    resizeMode: 'contain',
+                    marginLeft: 60,
+                  }}
+                />
+              </Text>
+              <View style={styles.topRight}>
+                <TouchableOpacity
+                  style={styles.bellContainer}
+                  onPress={handleBellClick}>
+                  <FontAwesome
+                    name="bell"
+                    color="#420475"
+                    style={styles.bellIcon}
+                  />
+                  {unreadCount > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{unreadCount}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {/* Render Notifications List */}
+                <Modal
+                  visible={showNotifications}
+                  transparent={true}
+                  animationType="slide"
+                  onRequestClose={handleCloseModal}>
+                  <View style={styles.modalBackground}>
+                    <View style={styles.notificationModal}>
+                      {/* Close Button */}
+                      <TouchableOpacity
+                        style={styles.closeButton}
+                        onPress={handleCloseModal}>
+                        <Text style={styles.closeText}>X</Text>
+                      </TouchableOpacity>
+
+                      {/* Notifications List */}
+                      {notifications.length > 0 ? (
+                        notifications.map((item, index) => (
+                          <View key={index} style={styles.notificationItem}>
+                            <Text style={styles.notificationText}>
+                              {item.message}
+                            </Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.noNotifications}>
+                          No notifications
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </Modal>
+
+                <View style={styles.profileImageContainer}>
+                  <Text style={styles.profileInitial}>
+                    {user.name.charAt(0).toUpperCase()}{' '}
+                    {/* Assuming 'name' is the user's full name */}
+                  </Text>
+                </View>
+              </View>
+            </View>
+            {/* User Info Row */}
+            <View style={styles.userInfoRow}>
+              <Text style={styles.userName}>
+                {user ? (
+                  <Text style={{fontSize: 17}}>Hi, {user?.name || 'User'}</Text>
+                ) : (
+                  <Text>Loading user details...</Text>
+                )}
+              </Text>
+              <View style={styles.locationContainer}>
+                <FontAwesome
+                  name="map-marker"
+                  color="#f95959"
+                  style={styles.locationIcon}
+                />
+                <Text style={styles.userLocation}>{cityName}</Text>
+              </View>
+            </View>
+            {/* Search Input */}
+            <View style={styles.searchContainer}>
+              <FontAwesome
+                name="search"
+                color="#666"
+                style={styles.searchIcon}
+              />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search appointments, doctors..."
+                placeholderTextColor="#666"
+                onFocus={handleFocus} // Trigger navigation when the input is focused
+                onChangeText={setSearchText} // Handle text input changes
+                value={searchText}
+              />
+            </View>
+            {/* Upcoming Appointment Row */}
+            <View style={styles.upcomingAppointmentRow}>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('MyAppointment')}>
+                <View style={styles.upcomingLeft}>
+                  <FontAwesome
+                    name="calendar"
+                    color="#420475"
+                    style={{fontSize: 24, marginRight: 10}}
+                  />
+                  <Text style={styles.upcomingText}>Upcoming Appointment</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => navigation.navigate('MyAppointment')}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{marginTop: 10, paddingHorizontal: 20}}>
+              <Text style={{fontSize: 16, fontWeight: '500'}}>
+                Can We Help You?
+              </Text>
+            </View>
+            <View style={styles.frameParent8}>
+              <View style={[styles.frameParent6, styles.frameParentFlexBox]}>
+                <Pressable
+                  style={styles.groupLayout}
+                  onPress={() => navigation.navigate('Doctors')}>
+                  <View
+                    style={[styles.groupChild, styles.groupChildShadowBox]}
+                  />
+                  <Image
+                    style={[styles.maskGroupIcon, styles.groupIconPosition]}
+                    resizeMode="cover"
+                    source={require('../assets/mask-group.png')}
+                  />
+                  <View
+                    style={[styles.frameParent10, styles.frameParentPosition]}>
+                    <View style={styles.frameParent11}>
+                      <View style={styles.videoConsultaionWrapper}>
+                        <Text
+                          style={[
+                            styles.videoConsultaion,
+                            styles.medicineTypo,
+                          ]}>
+                          Video Consultaion
+                        </Text>
+                      </View>
+                      <View style={styles.qualifiedDoctorsWrapper}>
+                        <Text
+                          style={[
+                            styles.qualifiedDoctors,
+                            styles.dailyTipsForTypo,
+                          ]}>
+                          Qualified Doctors
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Image
+                      style={[
+                        styles.portraitConfidentYoungMedicIcon,
+                        styles.portraitIconSpaceBlock,
+                      ]}
+                      resizeMode="cover"
+                      source={require('../assets/portraitconfidentyoungmedicaldoctorwhitebackgroundholdingtablethishands-1.png')}
+                    />
+                  </View>
+                </Pressable>
+                <View style={styles.groupLayout}>
+                  <Pressable
+                    style={styles.groupLayout}
+                    onPress={() => navigation.navigate('Voice Consultation')}>
+                    <View
+                      style={[styles.groupItem, styles.groupChildShadowBox]}
+                    />
+                    <Image
+                      style={[styles.maskGroupIcon, styles.groupIconPosition]}
+                      resizeMode="cover"
+                      source={require('../assets/mask-group1.png')}
+                    />
+                    <View style={styles.frameParentPosition}>
+                      <View style={styles.frameParent11}>
+                        <View style={styles.videoConsultaionWrapper}>
+                          <Text
+                            style={[
+                              styles.videoConsultaion,
+                              styles.medicineTypo,
+                            ]}>
+                            Book Appointment
+                          </Text>
+                        </View>
+                        <View style={styles.qualifiedDoctorsWrapper}>
+                          <Text
+                            style={[
+                              styles.qualifiedDoctors,
+                              styles.dailyTipsForTypo,
+                            ]}>
+                            Qualified Doctors
+                          </Text>
+                        </View>
+                      </View>
+                      <Image
+                        style={[
+                          styles.portraitSmilingYoungWomanDIcon,
+                          styles.portraitIconSpaceBlock,
+                        ]}
+                        resizeMode="cover"
+                        source={require('../assets/portraitsmilingyoungwomandoctorhealthcaremedicalworkerpointingfingersleftshowingclini-1.png')}
+                      />
+                    </View>
+                  </Pressable>
+                </View>
+              </View>
+              <View style={styles.frameParent8}>
+                <View style={[styles.frameParent6, styles.frameParentFlexBox]}>
+                  <Pressable onPress={() => navigation.navigate('Family Plan')}>
+                  <View style={styles.rectangleLayout}>
+                    <View style={[styles.groupInner, styles.rectangleLayout]} />
+                    <View
+                      style={[styles.maskGroupParent, styles.groupIconLayout]}>
+                      <Image
+                        style={[styles.maskGroupIcon2, styles.groupIconLayout]}
+                        resizeMode="cover"
+                        source={require('../assets/mask-group2.png')}
+                      />
+                      <View style={styles.groupWrapper}>
+                        <View
+                          style={[styles.groupView, styles.groupIconPosition]}>
+                          <View
+                            style={[
+                              styles.frameParent15,
+                              styles.iconParentPosition,
+                            ]}>
+                            <View style={styles.ellipseParent}>
+                              <Text style={styles.labTestTypo}>
+                                Family Care
+                              </Text>
+                            </View>
+                            <View style={styles.qualifiedDoctorsWrapper}>
+                              <Text
+                                style={[
+                                  styles.qualifiedDoctors,
+                                  styles.dailyTipsForTypo,
+                                ]}>
+                                Subscription Plan
+                              </Text>
+                            </View>
+                          </View>
+                          <Image
+                            style={styles.fullLengthPortraitSmilingFIcon}
+                            resizeMode="cover"
+                            source={require('../assets/fulllengthportraitsmilingfamilywithchild-1.png')}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                  </Pressable>
+                  <View style={styles.rectangleLayout}>
+                    <View
+                      style={[styles.rectangleView, styles.rectangleLayout]}
+                    />
+                    <View
+                      style={[styles.maskGroupParent, styles.groupIconLayout]}>
+                      <Image
+                        style={[styles.maskGroupIcon2, styles.groupIconLayout]}
+                        resizeMode="cover"
+                        source={require('../assets/mask-group3.png')}
+                      />
+                      <TouchableOpacity
+                        onPress={() => navigation.navigate('Hospitals')}>
+                        <View style={styles.groupWrapper}>
+                          <View
+                            style={[
+                              styles.frameParent16,
+                              styles.groupIconPosition,
+                            ]}>
+                            <View
+                              style={[
+                                styles.frameParent15,
+                                styles.iconParentPosition,
+                              ]}>
+                              <View style={styles.videoConsultaionWrapper}>
+                                <Text style={styles.labTestTypo}>
+                                  Find Hospitals
+                                </Text>
+                              </View>
+                              <View style={styles.qualifiedDoctorsWrapper}>
+                                <Text
+                                  style={[
+                                    styles.qualifiedDoctors,
+                                    styles.dailyTipsForTypo,
+                                  ]}>
+                                  Hospitals near you
+                                </Text>
+                              </View>
+                            </View>
+                            <Image
+                              style={styles.hospital1Icon}
+                              resizeMode="cover"
+                              source={require('../assets/hospital-1.png')}
+                            />
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.frameParent18}>
+                  <Pressable onPress={() => navigation.navigate('Available Test')}>
+                  <View style={styles.frameChildLayout}>
+                    <View
+                      style={[styles.frameInner, styles.frameChildLayout]}
+                    />
+                    <Text style={[styles.labTest, styles.labTestTypo]}>
+                      Lab Test
+                    </Text>
+                    <Image
+                      style={[styles.groupIcon, styles.groupIconLayout]}
+                      resizeMode="cover"
+                      source={require('../assets/group-19.png')}
+                    />
+                  </View>
+                  </Pressable>
+                  <Pressable onPress={() => navigation.navigate('Blogs')}>
+                  <View style={[styles.frameWrapper4, styles.frameChildLayout]}>
+                    <View
+                      style={[
+                        styles.rectangleParent3,
+                        styles.frameChildLayout,
+                      ]}>
+                      <View
+                        style={[styles.frameChild1, styles.frameChildLayout]}
+                      />
+                      <Image
+                        style={[styles.groupIcon, styles.groupIconLayout]}
+                        resizeMode="cover"
+                        source={require('../assets/mask-group4.png')}
+                      />
+                      <Text style={[styles.labTest, styles.labTestTypo]}>
+                        Health Blog
+                      </Text>
+                      <Image
+                        style={styles.medicines1Icon}
+                        resizeMode="cover"
+                        source={require('../assets/medicines-1.png')}
+                      />
+                    </View>
+                  </View>
+                  </Pressable>
+                  <Pressable onPress={() => navigation.navigate('Weight Loss')}>
+                  <View style={[styles.frameWrapper4, styles.frameChildLayout]}>
+                    <View
+                      style={[styles.frameChild2, styles.frameChildLayout]}
+                    />
+                    <Image
+                      style={[styles.groupIcon, styles.groupIconLayout]}
+                      resizeMode="cover"
+                      source={require('../assets/mask-group5.png')}
+                    />
+                    <Text style={[styles.labTest, styles.labTestTypo]}>
+                      Weight Loss
+                    </Text>
+                    <View style={styles.cheerfulGirlLostWeightRejo} />
+                    <Image
+                      style={styles.happyWomanWithScalesGreenIcon}
+                      resizeMode="cover"
+                      source={require('../assets/happywomanwithscalesgreenapple-1.png')}
+                    />
+                  </View>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.blog}>
+              <View style={styles.mentorsContainer}>
+                <Text style={styles.sectionTitle}>Health Blog</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {blogs.map((blog, index) => (
+                    <TouchableOpacity key={blog.id} onPress={() => navigation.navigate('Blog Detail', { id: blog.id })}>
+                    <View key={blog.id} style={styles.blogCard}>
+                      <Image
+                        source={{uri: blog?.image_url || ''}}
+                        style={styles.blogImage}
+                      />
+                      <Text
+                        style={styles.mentorQualification}
+                        numberOfLines={2}>
+                        {blog.title}
+                      </Text>
+                    </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+            <View style={{marginBottom: 120}}>
+              <View style={styles.mentorsContainer}>
+                <Text style={styles.sectionTitle}>
+                  Near By Doctors In {cityName}
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  
+
+                 
+                  {doctors.map((doctor, index) => (
+                    <TouchableOpacity onPress={() => ShowDoctorsProfile(doctor.id)}>
+                    <View key={doctor.id} style={styles.mentorCard}>
+                      <Image
+                        source={{ uri: doctor.image_url || 'https://via.placeholder.com/100' }}
+                        style={styles.doctorImage}
+                      />
+                      {console.log('doctors img :',doctor.image_url)}
+                      <Text style={styles.mentorName} numberOfLines={1}>
+                        {doctor.first_name} {doctor.last_name}
+                      </Text>
+                    </View>
+                    </TouchableOpacity>
+                  ))}
+                 
+                </ScrollView>
+              </View>
+              {/* Why Doctors Section */}
+              <View style={styles.featureContainer}>
+                {/* Text Column */}
+
+                <View style={styles.leftColumn}>
+                  <Text style={styles.headerText}>Why Doctors365?</Text>
+                  {[
+                    'PMC Verified Doctors\n30,000+ Doctors Available',
+                    '12/7 Customer Support\nWell-Trained Team',
+                    'Secure Online Payments\nSSL-encrypted',
+                  ].map((text, index) => (
+                    <View key={index} style={styles.Colrow}>
+                      {/* Serial Number */}
+                      <View style={styles.serialNumberContainer}>
+                        <Text style={styles.serialNumberText}>{index + 1}</Text>
+                      </View>
+                      {/* Content */}
+                      <Text style={styles.text}>{text}</Text>
+                    </View>
+                  ))}
+                </View>
+                {/* Image Column */}
+                <View style={styles.rightColumn}>
+                  <Image
+                    source={{uri: 'https://via.placeholder.com/150'}} // Replace with your image URL
+                    style={styles.image}
+                    resizeMode="contain"
+                  />
+                </View>
+                {/* Social Media Section */}
+              </View>
+              <View style={styles.socialMediaContainer}>
+                <Text style={styles.socialMediaHeader}>Follow Us</Text>
+                <View style={styles.iconsRow}>
+                  {/* Facebook Icon */}
+                  <View style={styles.iconWrapper}>
+                    <Ionicons name="logo-facebook" size={30} color="#007cb9" />
+                    <Text style={styles.iconLabel}>3.5 Follower</Text>
+                  </View>
+                  {/* Twitter Icon */}
+                  <View style={styles.iconWrapper}>
+                    <Ionicons name="logo-youtube" size={30} color="#bc2525" />
+                    <Text style={styles.iconLabel}>10k Subscribe</Text>
+                  </View>
+                  {/* Instagram Icon */}
+                  <View style={styles.iconWrapper}>
+                    <Ionicons name="logo-instagram" size={30} color="#2e79ba" />
+                    <Text style={styles.iconLabel}>5.8k Follower</Text>
+                  </View>
+                  <View style={styles.iconWrapper}>
+                    <Ionicons name="logo-tiktok" size={30} color="#081f37" />
+                    <Text style={styles.iconLabel}>1m Follower</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  };
+
+  return (
+    <NavigationContainer independent={true}>
+      <Tab.Navigator
+        initialRouteName="Home"
+        screenOptions={{
+          tabBarStyle: {
+            backgroundColor: '#274A8A', // Set the tab bar background color
+          },
+          tabBarActiveTintColor: '#fff', // Set the active tab icon color to white
+          tabBarInactiveTintColor: '#ddd', // Set the inactive tab icon color
+        }}
+      >
+        <Tab.Screen
+          name="Home"
+          component={HomePage}
+          options={{
+            drawerItemStyle: { display: 'none' },
+            headerShown: false,
+            tabBarIcon: ({ color, size }) => (
+              <FontAwesome
+                name="home"
+                color={color} // Use the color passed from screenOptions
+                style={{ fontSize: 32, fontWeight: 'bold' }}
+              />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Appointment"
+          component={MyAppointment}
+          options={{
+            tabBarIcon: ({ color, size }) => (
+              <FontAwesome
+                name="calendar"
+                color={color} // Use the color passed from screenOptions
+                style={{ fontSize: 32, fontWeight: 'bold' }}
+              />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Profile"
+          component={ProfileScreen}
+          options={{
+            tabBarIcon: ({ color, size }) => (
+              <FontAwesome
+                name="user"
+                color={color} // Use the color passed from screenOptions
+                style={{ fontSize: 32, fontWeight: 'bold' }}
+              />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Zoom Meet"
+          component={ZoomMeetScreen}
+          options={{
+            tabBarIcon: ({ color, size }) => (
+              <FontAwesome
+                name="video-camera"
+                color={color} // Use the color passed from screenOptions
+                style={{ fontSize: 32, fontWeight: 'bold' }}
+              />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="Reviews"
+          component={ReviewScreen}
+          options={{
+            tabBarButton: () => <View style={{ width: 0, height: 0 }}></View>,
+            tabBarVisible: false, // Hide tab bar on this screen
+          }}
+        />
+        <Tab.Screen
+          name="Join Meet"
+          component={JoinMeetingScreen}
+          options={{
+            tabBarButton: () => <View style={{ width: 0, height: 0 }}></View>,
+            tabBarVisible: false, // Hide tab bar on this screen
+          }}
+        />
+      </Tab.Navigator>
+    </NavigationContainer>
+
+  );
+}
+const styles = StyleSheet.create({
+  container: {flex: 1,
+     backgroundColor: '#f8f9fa',
+     
+    },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: '#fff',
+    elevation: 4,
+  },
+  
+    profileImageContainer: {
+      width: 40,               // Set the size of the circle
+      height: 40,              // Set the size of the circle
+      borderRadius: 20,        // Half of the width/height to make it a circle
+      backgroundColor: '#274A8A',  // Circle color (can be dynamic or based on user's profile color)
+      justifyContent: 'center',     // Center the content vertically
+      alignItems: 'center',         // Center the content horizontally
+    },
+    profileInitial: {
+      color: '#fff',            // Text color
+      fontSize: 16,             // Text size
+      fontWeight: 'bold',       // Optional: bold font for the initial
+    },
+  
+  
+  logoText: {
+    fontSize: 20, 
+    fontWeight: 'bold', 
+    top: -10
+  },
+  topRight: {flexDirection: 'row', alignItems: 'center'},
+  profileImage: {width: 40, height: 40, borderRadius: 20, marginLeft: 10},
+  userInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#f8f8f8',
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  featureContainer: {
+    flexDirection: 'row', // Ensures horizontal alignment of columns
+    padding: 10,
+    alignItems: 'flex-start',
+  },
+  leftColumn: {
+    flex: 2, // Takes more space for the text
+    paddingRight: 10,
+  },
+  rightColumn: {
+    flex: 1, // Smaller space for the image
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  Colrow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  serialNumberContainer: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#007bff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  serialNumberText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  text: {
+    flex: 1,
+    fontSize: 14,
+  },
+  image: {
+    width: 120,
+    height: 120,
+  },
+  socialMediaContainer: {
+    flex: 1,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  socialMediaHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  iconsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  iconWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconLabel: {
+    marginTop: 5,
+    fontSize: 12,
+    color: '#555',
+  },
+  iconBackground: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#007bff',
+  },
+  iconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#007bff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  iconText: {
+    color: '#fff',
+  },
+  userName: {
+    fontSize: 16,
+    color: '#333',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationIcon: {
+    fontSize: 16,
+    marginRight: 5,
+  },
+  userLocation: {
+    fontSize: 16,
+    color: '#666',
+  },
+  upcomingAppointmentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    backgroundColor: '#f0f0f0',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#e7eaf6',
+  },
+  upcomingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  upcomingText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  seeAllText: {
+    fontSize: 16,
+    color: '#274A8A',
+    fontWeight: 'bold',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingVertical: 2, // Decreased from 10 to 6 to reduce height
+    paddingHorizontal: 15,
+    marginHorizontal: 20,
+    marginVertical: 15,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  searchIcon: {
+    fontSize: 20,
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+  },
+  frameParent8: {
+    marginTop: 10,
+    padding:5,
+    paddingRight:20,
+    alignSelf: 'stretch',
+  },
+  frameParent6: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+  },
+  frameParentFlexBox: {
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  rectangleLayout: {
+    height: 90,
+    width: 190,
+  },
+  maskGroupParent: {
+    paddingVertical: 0,
+    width: 188,
+    left: 1,
+    top: 1,
+    paddingHorizontal: Padding.p_9xs,
+  },
+  groupIconLayout: {
+    height: 88,
+    position: 'absolute',
+  },
+  groupWrapper: {
+    width: 179,
+    zIndex: 1,
+    height: 87,
+    marginTop: 10,
+  },
+  groupView: {
+    width: 182,
+    height: 87,
+    position: 'absolute',
+  },
+  maskGroupIcon2: {
+    zIndex: 0,
+    width: 188,
+    left: 0,
+    top: 0,
+  },
+  groupLayout: {
+    height: 190,
+    width: 190,
+  },
+  groupChild: {
+    backgroundColor: '#f1f8fe',
+    height: 190,
+    width: 190,
+  },
+  groupChildShadowBox: {
+    shadowOpacity: 1,
+    elevation: 11,
+    shadowRadius: 11,
+    shadowOffset: {
+      width: 2,
+      height: 4,
+    },
+    shadowColor: 'rgba(39, 74, 138, 0.1)',
+    borderRadius: Border.br_3xs,
+    borderColor: Color.blueStroke,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  maskGroupIcon: {
+    height: 188,
+    width: 188,
+    position: 'absolute',
+  },
+  groupIconPosition: {
+    left: 1,
+    top: 1,
+  },
+  frameParent15: {
+    position: 'absolute',
+  },
+  iconParentPosition: {
+    left: 0,
+    top: 0,
+  },
+  ellipseParent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  labTestTypo: {
+    fontSize: FontSize.size_sm,
+    fontFamily: FontFamily.poppinsSemiBold,
+    fontWeight: '600',
+    textAlign: 'left',
+    color: Color.blue1,
+  },
+  frameParent10: {
+    justifyContent: 'center',
+  },
+  frameParentPosition: {
+    alignItems: 'flex-end',
+    height: 182,
+    width: 176,
+    left: 7,
+    top: 7,
+    position: 'absolute',
+  },
+  frameParent11: {
+    alignSelf: 'stretch',
+  },
+  videoConsultaionWrapper: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+  },
+  videoConsultaion: {
+    fontSize: FontSize.size_base,
+    lineHeight: 24,
+    textAlign: 'left',
+    color: Color.blue1,
+  },
+  medicineTypo: {
+    fontFamily: FontFamily.poppinsSemiBold,
+    fontWeight: '600',
+  },
+  qualifiedDoctorsWrapper: {
+    marginTop: -4,
+
+    flexDirection: 'row',
+  },
+  qualifiedDoctors: {
+    fontFamily: FontFamily.poppinsMedium,
+    fontWeight: '500',
+  },
+  dailyTipsForTypo: {
+    fontSize: FontSize.size_xs,
+    textAlign: 'left',
+    color: Color.blue1,
+  },
+  portraitConfidentYoungMedicIcon: {
+    width: 94,
+  },
+  portraitIconSpaceBlock: {
+    marginTop: 6,
+    height: 138,
+  },
+  groupItem: {
+    backgroundColor: '#ffeef2',
+    height: 190,
+    width: 190,
+  },
+  groupChildShadowBox: {
+    shadowOpacity: 1,
+    elevation: 11,
+    shadowRadius: 11,
+    shadowOffset: {
+      width: 2,
+      height: 4,
+    },
+    shadowColor: 'rgba(39, 74, 138, 0.1)',
+    borderRadius: Border.br_3xs,
+    borderColor: Color.blueStroke,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  fullLengthPortraitSmilingFIcon: {
+    left: 96,
+    borderBottomRightRadius: Border.br_4xs,
+    width: 86,
+    height: 87,
+    top: 0,
+    position: 'absolute',
+  },
+  rectangleView: {
+    backgroundColor: 'rgba(244, 234, 255, 0.52)',
+    shadowOpacity: 1,
+    elevation: 11,
+    shadowRadius: 11,
+    shadowOffset: {
+      width: 2,
+      height: 4,
+    },
+    shadowColor: 'rgba(39, 74, 138, 0.1)',
+    borderRadius: Border.br_3xs,
+    borderColor: Color.blueStroke,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  frameParent16: {
+    width: 183,
+    height: 87,
+    position: 'absolute',
+  },
+  hospital1Icon: {
+    top: 16,
+    left: 108,
+    width: 75,
+    height: 71,
+    position: 'absolute',
+  },
+  frameParent18: {
+    marginTop: 10,
+    alignItems: 'center',
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+  },
+  frameChildLayout: {
+    width: 123,
+    height: 90,
+  },
+  frameInner: {
+    backgroundColor: 'rgba(255, 235, 223, 0.52)',
+    shadowOpacity: 1,
+    elevation: 11,
+    shadowRadius: 11,
+    shadowOffset: {
+      width: 2,
+      height: 4,
+    },
+    shadowColor: 'rgba(39, 74, 138, 0.1)',
+    borderRadius: Border.br_3xs,
+    borderColor: Color.blueStroke,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  labTest: {
+    top: 5,
+    left: 5,
+    position: 'absolute',
+  },
+  labTestTypo: {
+    fontSize: FontSize.size_sm,
+    fontFamily: FontFamily.poppinsSemiBold,
+    fontWeight: '600',
+    textAlign: 'left',
+    color: Color.blue1,
+  },
+  groupIcon: {
+    width: 121,
+    left: 1,
+    top: 1,
+  },
+  frameWrapper4: {
+    marginLeft: 10,
+  },
+  rectangleParent3: {
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  frameChild1: {
+    backgroundColor: '#e0ffff',
+    shadowOpacity: 1,
+    elevation: 11,
+    shadowRadius: 11,
+    shadowOffset: {
+      width: 2,
+      height: 4,
+    },
+    shadowColor: 'rgba(39, 74, 138, 0.1)',
+    borderRadius: Border.br_3xs,
+    borderColor: Color.blueStroke,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  medicines1Icon: {
+    top: 32,
+    left: 20,
+    width: 102,
+    height: 57,
+    position: 'absolute',
+  },
+  frameChild2: {
+    backgroundColor: '#fff1d3',
+    shadowOpacity: 1,
+    elevation: 11,
+    shadowRadius: 11,
+    shadowOffset: {
+      width: 2,
+      height: 4,
+    },
+    shadowColor: 'rgba(39, 74, 138, 0.1)',
+    borderRadius: Border.br_3xs,
+    borderColor: Color.blueStroke,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    left: 0,
+    top: 0,
+    position: 'absolute',
+  },
+  cheerfulGirlLostWeightRejo: {
+    top: 20,
+    left: 62,
+    width: 58,
+    height: 69,
+    position: 'absolute',
+  },
+  happyWomanWithScalesGreenIcon: {
+    top: 15,
+    left: 67,
+    width: 52,
+    height: 74,
+    borderBottomRightRadius: Border.br_7xs,
+    position: 'absolute',
+  },
+  mentorsContainer: {
+    marginTop: 24,
+    
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    paddingHorizontal: 10,
+  },
+  blogCard: {
+    width: width * 0.3,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 4,
+    marginRight: 8,
+    border: 1,
+    borderColor: 'grey',
+    borderWidth: 2,
+  },
+  mentorCard: {
+    width: width * 0.3,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+    marginRight: 8,
+    border: 1,
+    borderColor: 'grey',
+    borderWidth: 2,
+  },
+  blogImage: {
+    width: 100,
+    height: 50,
+    borderRadius: 5,
+    marginBottom: 8,
+    marginRight: 10,
+    justifyContent: 'center',
+    marginLeft: 2,
+  },
+  doctorImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+  mentorName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  mentorQualification: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  bellContainer: {
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -10,
+    backgroundColor: 'red',
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  bellContainer: {
+    position: 'relative',
+    alignSelf: 'flex-end',
+    marginTop: 20,
+    marginRight: 20,
+  },
+  bellIcon: {
+    fontSize: 24,
+  },
+  notificationList: {
+    position: 'absolute',
+    top: 50,
+    right: 10,
+    backgroundColor: 'white',
+    zIndex: 10, // Ensure it's above other elements
+    padding: 10,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  notificationItem: {
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+  },
+  notificationText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  noNotifications: {
+    textAlign: 'center',
+    color: '#aaa',
+  },
+  modalBackground: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Semi-transparent background
+  },
+  notificationModal: {
+    width: '80%',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 10,
+    padding: 20,
+    elevation: 5, // Adds shadow for better visibility
+    zIndex: 10000, // Ensures it stays above other content
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    padding: 5,
+    backgroundColor: 'yellow',
+    borderRadius: 50,
+  },
+  closeText: {
+    color: 'red',
+    fontSize: 18,
+  },
+});
