@@ -20,6 +20,7 @@ const HospitalSearchScreen = () => {
   const [userLocation, setUserLocation] = useState(null);
   const [userAddress, setUserAddress] = useState('');
   const mapRef = useRef(null);
+const mapapikey = getSetting('geocording_api_key');
 
   // 1. Get User Location
   useEffect(() => {
@@ -77,20 +78,17 @@ const HospitalSearchScreen = () => {
   };
   
   
- const mapapikey = getSetting('maps_platform_api_key');
+ 
  console.log('mapapikey', mapapikey);
-
-  // 2. Get Address from Coordinates
-const googleMapsApiKey = Platform.OS === 'android'
-  ? getSetting('maps_platform_api_key')
-  : getSetting('maps_platform_api_key');
   const getAddressFromCoordinates = async (lat, lng) => {
-       const API_KEY = googleMapsApiKey;
+       const API_KEY = mapapikey;
    //const API_KEY = 'AIzaSyBpMcgqMMDkwDziXSTEBDTVgwIdpRGTy5Y';
     try {
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${API_KEY}`
       );
+      //console.log(`Fetching: https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${API_KEY}`);
+
       const data = await response.json();
       if (data.results.length > 0) {
         setUserAddress(data.results[0].formatted_address);
@@ -227,11 +225,14 @@ const googleMapsApiKey = Platform.OS === 'android'
 
       {/* Map with User Location and Hospitals */}
       <MapView
-        ref={mapRef}
-        style={styles.map}
-        region={region}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
+         ref={mapRef}
+          style={styles.map}
+          region={region}
+          showsUserLocation={true}
+          showsMyLocationButton={true}
+          provider={Platform.OS === 'android' ? 'google' : null} // Add this line
+          onMapReady={() => console.log('Map ready')}
+          onError={(error) => console.log('Map error:', error)}
       >
         {suggestions.map(hospital => (
           <Marker
@@ -272,7 +273,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     color: '#333',
-    height: 40,
+    height: 60,
     borderColor: '#ddd',
     borderWidth: 1,
     borderRadius: 8,
@@ -310,7 +311,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   marker: {
-    backgroundColor: '#3498db',
+    backgroundColor: '#dc2f2f',
     padding: 5,
     borderRadius: 20,
     borderWidth: 2,
