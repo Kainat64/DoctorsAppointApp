@@ -1,5 +1,4 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable react/no-unstable-nested-components */
+
 import React, {useEffect, useState, useCallback, memo} from 'react';
 import {
   View,
@@ -203,17 +202,25 @@ const FilterModal = ({
   typeFilter,
   setTypeFilter,
   resetFilters,
-  showDatePicker,
-  setShowDatePicker,
 }) => {
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const handleBackdropPress = () => {
+    if (!showDatePicker) {
+      onClose();
+    }
+  };
+
   return (
     <Modal
       animationType="slide"
       transparent={true}
       visible={visible}
-      onRequestClose={onClose}>
-      <View style={styles.centeredView}>
-        <View style={styles.modalView}>
+      onRequestClose={handleBackdropPress}>
+      <Pressable 
+        style={styles.centeredView} 
+        onPress={handleBackdropPress}>
+        <Pressable style={styles.modalView} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.modalTitle}>Filter Appointments</Text>
           
           {/* Date Filter */}
@@ -287,8 +294,8 @@ const FilterModal = ({
               <Text style={styles.buttonText}>Apply Filters</Text>
             </Pressable>
           </View>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 };
@@ -308,8 +315,6 @@ const AppointmentListWithFilters = ({
   typeFilter,
   setTypeFilter,
   resetFilters,
-  showDatePicker,
-  setShowDatePicker,
   onClearFilters,
   onRefresh,
   refreshing
@@ -354,7 +359,6 @@ const AppointmentListWithFilters = ({
       <View style={styles.filterHeader}>
         <Text style={styles.filterResultsText}>
           Showing {appointments.length} appointment(s)
-         
         </Text>
         <View style={styles.filterActions}>
           <TouchableOpacity 
@@ -380,9 +384,7 @@ const AppointmentListWithFilters = ({
         setStatusFilter={setStatusFilter}
         typeFilter={typeFilter}
         setTypeFilter={setTypeFilter}
-        resetFilters={handleClearFilters}
-        showDatePicker={showDatePicker}
-        setShowDatePicker={setShowDatePicker}
+        resetFilters={resetFilters}
       />
       
       <FlatList
@@ -444,11 +446,18 @@ const MyAppointment = () => {
   const [pastAppointments, setPastAppointments] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [dateFilter, setDateFilter] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  // Separate filter states for each tab
+  const [upcomingFilters, setUpcomingFilters] = useState({
+    date: null,
+    status: 'all',
+    type: 'all'
+  });
   
+  const [pastFilters, setPastFilters] = useState({
+    date: null,
+    status: 'all',
+    type: 'all'
+  });
 
   const getStatusStyle = useCallback(status => {
     return {
@@ -502,20 +511,16 @@ const MyAppointment = () => {
       setLoading(false);
     }
   }, [pastAppointments]);
-// 1. Function to clear all filters and reload data
+
   const clearFiltersAndReload = useCallback(async () => {
-    // Reset all filters
-    setDateFilter(null);
-    setStatusFilter('all');
-    setTypeFilter('all');
+    resetUpcomingFilters();
+    resetPastFilters();
     
-    // Refresh data
     setRefreshing(true);
     await Promise.all([fetchAppointments(), fetchPastAppointments()]);
     setRefreshing(false);
   }, [fetchAppointments, fetchPastAppointments]);
 
-  // 2. Function to refresh and get updated data
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -527,34 +532,26 @@ const MyAppointment = () => {
     }
   }, [fetchAppointments, fetchPastAppointments]);
 
-    useEffect(() => {
+  useEffect(() => {
     fetchAppointments();
     fetchPastAppointments();
-
-    // Remove the automatic refresh interval
-    // If you need to refresh, consider doing it when the component comes into focus
-    // or when the user manually triggers a refresh
 
     return () => {
       // Cleanup if needed
     };
   }, [fetchAppointments, fetchPastAppointments]);
 
-  // Filter functions
-  const filterAppointments = (appointments, isPast = false) => {
+  const filterAppointments = (appointments, filters, isPast = false) => {
     return appointments.filter(appointment => {
-      // Date filter
-      if (dateFilter && moment(appointment.date).format('YYYY-MM-DD') !== moment(dateFilter).format('YYYY-MM-DD')) {
+      if (filters.date && moment(appointment.date).format('YYYY-MM-DD') !== moment(filters.date).format('YYYY-MM-DD')) {
         return false;
       }
       
-      // Status filter (only for upcoming appointments)
-      if (!isPast && statusFilter !== 'all' && parseInt(appointment.status) !== parseInt(statusFilter)) {
+      if (!isPast && filters.status !== 'all' && parseInt(appointment.status) !== parseInt(filters.status)) {
         return false;
       }
       
-      // Type filter
-      if (typeFilter !== 'all' && parseInt(appointment.types) !== parseInt(typeFilter)) {
+      if (filters.type !== 'all' && parseInt(appointment.types) !== parseInt(filters.type)) {
         return false;
       }
       
@@ -562,34 +559,42 @@ const MyAppointment = () => {
     });
   };
 
-  const resetFilters = () => {
-    setDateFilter(null);
-    setStatusFilter('all');
-    setTypeFilter('all');
+  const resetUpcomingFilters = () => {
+    setUpcomingFilters({
+      date: null,
+      status: 'all',
+      type: 'all'
+    });
   };
 
+  const resetPastFilters = () => {
+    setPastFilters({
+      date: null,
+      status: 'all',
+      type: 'all'
+    });
+  };
 
   const AppointmentDetail = () => (
     <AppointmentListWithFilters
-      appointments={filterAppointments(appointments)}
+      appointments={filterAppointments(appointments, upcomingFilters)}
       loading={loading}
       error={error}
       onRetry={fetchAppointments}
       navigation={navigation}
       getStatusStyle={getStatusStyle}
       isPastAppointments={false}
-      // Pass filter props and handlers
-      dateFilter={dateFilter}
-      setDateFilter={setDateFilter}
-      statusFilter={statusFilter}
-      setStatusFilter={setStatusFilter}
-      typeFilter={typeFilter}
-      setTypeFilter={setTypeFilter}
-      resetFilters={resetFilters}
-      showDatePicker={showDatePicker}
-      setShowDatePicker={setShowDatePicker}
-      // Pass refresh functions
-      onClearFilters={clearFiltersAndReload}
+      dateFilter={upcomingFilters.date}
+      setDateFilter={(date) => setUpcomingFilters(prev => ({...prev, date}))}
+      statusFilter={upcomingFilters.status}
+      setStatusFilter={(status) => setUpcomingFilters(prev => ({...prev, status}))}
+      typeFilter={upcomingFilters.type}
+      setTypeFilter={(type) => setUpcomingFilters(prev => ({...prev, type}))}
+      resetFilters={resetUpcomingFilters}
+      onClearFilters={() => {
+        resetUpcomingFilters();
+        handleRefresh();
+      }}
       onRefresh={handleRefresh}
       refreshing={refreshing}
     />
@@ -597,24 +602,23 @@ const MyAppointment = () => {
 
   const PastAppointmentList = () => (
     <AppointmentListWithFilters
-      appointments={filterAppointments(pastAppointments, true)}
+      appointments={filterAppointments(pastAppointments, pastFilters, true)}
       loading={loading}
       error={error}
       onRetry={fetchPastAppointments}
       navigation={navigation}
       isPastAppointments={true}
-      // Pass filter props and handlers
-      dateFilter={dateFilter}
-      setDateFilter={setDateFilter}
-      statusFilter={statusFilter}
-      setStatusFilter={setStatusFilter}
-      typeFilter={typeFilter}
-      setTypeFilter={setTypeFilter}
-      resetFilters={resetFilters}
-      showDatePicker={showDatePicker}
-      setShowDatePicker={setShowDatePicker}
-      // Pass refresh functions
-      onClearFilters={clearFiltersAndReload}
+      dateFilter={pastFilters.date}
+      setDateFilter={(date) => setPastFilters(prev => ({...prev, date}))}
+      statusFilter={pastFilters.status}
+      setStatusFilter={(status) => setPastFilters(prev => ({...prev, status}))}
+      typeFilter={pastFilters.type}
+      setTypeFilter={(type) => setPastFilters(prev => ({...prev, type}))}
+      resetFilters={resetPastFilters}
+      onClearFilters={() => {
+        resetPastFilters();
+        handleRefresh();
+      }}
       onRefresh={handleRefresh}
       refreshing={refreshing}
     />
@@ -649,7 +653,6 @@ const MyAppointment = () => {
     </NavigationContainer>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
