@@ -254,7 +254,7 @@ export default function HomeScreen({props}) {
       });
 
     const getCityNameFromCoords = async (latitude, longitude) => {
-      const API_KEY = 'AIzaSyBhVTUgGfUX_wRVPYAJVItDqxbhZgMDHok';
+      
       const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${API_KEY}`;
 
       try {
