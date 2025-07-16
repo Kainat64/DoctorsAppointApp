@@ -1,4 +1,5 @@
-
+/* eslint-disable prettier/prettier */
+/* eslint-disable react/no-unstable-nested-components */
 import React, {useEffect, useState, useCallback, memo} from 'react';
 import {
   View,
@@ -321,8 +322,10 @@ const AppointmentListWithFilters = ({
 }) => {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
 
+  // Combined refresh that resets filters and reloads data
   const handleRefresh = async () => {
-    await onRefresh();
+    await onClearFilters();  // Reset filters first
+    await onRefresh();       // Then refresh data
   };
 
   const handleClearFilters = async () => {
@@ -361,6 +364,7 @@ const AppointmentListWithFilters = ({
           Showing {appointments.length} appointment(s)
         </Text>
         <View style={styles.filterActions}>
+          {/* Refresh button now resets filters AND reloads data */}
           <TouchableOpacity 
             style={styles.refreshButtonSmall}
             onPress={handleRefresh}>
@@ -575,6 +579,15 @@ const MyAppointment = () => {
     });
   };
 
+  // Clear filters for a specific tab
+  const clearTabFilters = (isPast) => {
+    if (isPast) {
+      resetPastFilters();
+    } else {
+      resetUpcomingFilters();
+    }
+  };
+
   const AppointmentDetail = () => (
     <AppointmentListWithFilters
       appointments={filterAppointments(appointments, upcomingFilters)}
@@ -590,7 +603,7 @@ const MyAppointment = () => {
       setStatusFilter={(status) => setUpcomingFilters(prev => ({...prev, status}))}
       typeFilter={upcomingFilters.type}
       setTypeFilter={(type) => setUpcomingFilters(prev => ({...prev, type}))}
-      resetFilters={resetUpcomingFilters}
+      resetFilters={() => resetUpcomingFilters()}
       onClearFilters={() => {
         resetUpcomingFilters();
         handleRefresh();
@@ -614,7 +627,7 @@ const MyAppointment = () => {
       setStatusFilter={(status) => setPastFilters(prev => ({...prev, status}))}
       typeFilter={pastFilters.type}
       setTypeFilter={(type) => setPastFilters(prev => ({...prev, type}))}
-      resetFilters={resetPastFilters}
+      resetFilters={() => resetPastFilters()}
       onClearFilters={() => {
         resetPastFilters();
         handleRefresh();
@@ -653,6 +666,7 @@ const MyAppointment = () => {
     </NavigationContainer>
   );
 };
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
